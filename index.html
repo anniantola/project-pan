@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000"><meta name="description" content="Your collection, empties, and beauty spending in one private Project Pan tracker."><title>Project Pan — Collection & Empties</title><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon-192.png"><link rel="apple-touch-icon" href="./icon-180.png"><link rel="stylesheet" href="./styles.css"></head>
+<body class="theme-dark">
+<div id="app-shell">
+ <header class="topbar"><div class="topbar-inner"><button class="brand" data-page="home" aria-label="Home"><span class="brand-mark">◌</span><span>project <b>pan</b><small>COLLECTION TRACKER</small></span></button><nav class="desktop-nav" aria-label="Main navigation"><button data-page="home">Overview</button><button data-page="inventory">Collection</button><button data-page="pan">Project Pan</button><button data-page="insights">Insights</button><button data-page="wishlist">Wishlist</button></nav><div class="header-actions"><span id="saving-status" class="save-indicator" aria-live="polite"></span><button class="icon-btn" data-page="settings" title="Settings" aria-label="Settings">⚙</button></div></div></header>
+ <main id="page" class="page" aria-live="polite"><div class="loading">Opening your collection…</div></main>
+ <button id="add-fab" class="fab" data-action="add-product" title="Add product" aria-label="Add product">＋</button>
+ <nav class="bottom-nav" aria-label="Mobile navigation"><button data-page="home"><span>⌂</span>Home</button><button data-page="inventory"><span>▦</span>Collection</button><button data-page="pan"><span>◎</span>Pan</button><button data-page="insights"><span>▥</span>Insights</button><button data-page="wishlist"><span>♡</span>Wishlist</button></nav>
+</div>
+<div id="modal-root"></div><div id="toast-root" aria-live="polite"></div>
+<script type="module" src="./app.mjs"></script>
+</body></html>
