@@ -1,6 +1,6 @@
 // The app never forces a reload while someone is editing. Content refreshes in the
 // background and is used on a subsequent clean launch, or after explicit update.
-const CACHE='project-pan-app-v1';
+const CACHE='project-pan-app-v2';
 const CORE=['./','./index.html','./styles.css','./app.mjs','./model.mjs','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE))));
 self.addEventListener('activate',event=>event.waitUntil((async()=>{const names=await caches.keys();await Promise.all(names.filter(name=>name.startsWith('project-pan-app-')&&name!==CACHE).map(name=>caches.delete(name)));await self.clients.claim()})()));

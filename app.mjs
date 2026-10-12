@@ -10,7 +10,7 @@ const pct=x=>Math.min(100,Math.max(0,Number(x)||0));
 const acqName={existing:'Already owned',purchase:'Purchased',gift:'Received as gift'};
 const statusName={'unopened':'Unopened','in-use':'In use','finished':'Finished','decluttered':'Decluttered','gifted':'Given away'};
 const touch=x=>{x.updatedAt=stamp();return x};
-let lookupToken=0,db=blank(),page='home',scope=null,statsScope=null,period='year',invStatus='active',invSort='recent',search='',wishlistShow='open',challengeShow='active',openModal='',pendingInstall=null,workerWaiting=null,qr=null,media=null,scanInterval=null,scanBusy=false,saveChain=Promise.resolve(),storageError=false,toastTimer=null,editing=false,modalPayload=null;
+let lookupToken=0,db=blank(),page='home',scope=null,statsScope=null,period='year',invStatus='active',invSort='recent',search='',wishlistShow='open',challengeShow='active',openModal='',pendingInstall=null,workerWaiting=null,zxingControls=null,zxingReader=null,media=null,scanInterval=null,scanBusy=false,scannerEpoch=0,barcodeLookupBusy=false,fabOpen=false,saveChain=Promise.resolve(),storageError=false,toastTimer=null,editing=false,modalPayload=null;
 const getProduct=id=>db.products.find(x=>x.id===id);
 const getUnit=id=>db.units.find(x=>x.id===id);
 const getCat=id=>categories(db).find(c=>c.id===id);
@@ -21,7 +21,7 @@ const load=()=>new Promise((resolve,reject)=>{const request=indexedDB.open('proj
 const persist=data=>new Promise((resolve,reject)=>{const request=indexedDB.open('project-pan-data',1);request.onerror=()=>reject(request.error);request.onsuccess=()=>{let conn=request.result,tx=conn.transaction('state','readwrite');tx.objectStore('state').put(data,'main');tx.oncomplete=()=>{conn.close();resolve()};tx.onerror=()=>{conn.close();reject(tx.error)};tx.onabort=()=>{conn.close();reject(tx.error)}}});
 function save(){db.updatedAt=stamp();const snapshot=structuredClone(db);$('#saving-status').textContent='Saving…';saveChain=saveChain.catch(()=>{}).then(()=>persist(snapshot)).then(()=>{$('#saving-status').textContent='Saved';storageError=false}).catch(e=>{storageError=true;$('#saving-status').textContent='Not saved';showToast('Storage error — export a backup now');console.error(e)});return saveChain;}
 function change(mutator,{silent=false}={}){mutator(db);save();render();if(!silent)showToast('Saved to your collection');}
-function navigate(next){page=next;closeModal();render();window.scrollTo({top:0,behavior:'instant'})}
+function navigate(next){closeFab();page=next;closeModal();render();window.scrollTo({top:0,behavior:'instant'})}
 const btn=(text,action,other='',cls='button')=>`<button class="${cls}" data-action="${action}" ${other}>${text}</button>`;
 const kicker=(title,sub='')=>`<div class="eyebrow">${esc(sub||'your collection')}</div><h1 class="page-title">${esc(title)}</h1>`;
 const section=(title,right='')=>`<div class="section-heading"><h2>${title}</h2><span class="hint">${right}</span></div>`;
@@ -78,12 +78,12 @@ function settings(){const custom=db.categories.slice().sort((a,b)=>categoryName(
  <div class="settings-section"><h2>Backup & restore</h2><p>Everything stays in this browser’s local storage, including product photos. Export a JSON backup regularly, especially before clearing browser data or changing phones. Backups may contain sensitive purchase details and photos.</p><div class="row wrap">${btn('↓ Export complete JSON','export','','button primary')}${btn('↑ Import / merge JSON','import','','button')}</div></div>
  <div class="settings-section"><h2>App & privacy</h2><p>No account, no sync, no analytics. The app works offline after the first load. Barcode lookup uses Open Beauty Facts when online; your barcode is sent only to that service for lookup. If camera scanning is unsupported natively, a scanner library may be loaded from a CDN when you first use it online.</p><div class="row wrap">${btn('Install app','install','','button')}${btn('Check for updates','check-update','','button')}${btn('Load example collection','demo','','button')}</div><div id="update-alert" class="mt12">${workerWaiting?`<div class="notice info">A new app version is ready. ${btn('Apply update','apply-update','','button small-btn primary')} (does not automatically interrupt editing)</div>`:''}</div></div>
  <div class="settings-section"><h2>Danger zone</h2><p>Deleting everything cannot be undone without a backup.</p>${btn('Erase all local app data','erase','','button danger')}</div><div class="small subtle mt24">Project Pan · v1.0 · Works best installed over HTTPS on your phone.</div>`;}
-function render(){document.body.className='theme-'+(db.settings.theme==='light'?'light':'dark');$('#page').innerHTML=({home,inventory,pan,insights,wishlist,settings}[page]||home)();document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#add-fab').style.display=page==='settings'?'none':'';document.querySelector('meta[name="theme-color"]').content=db.settings.theme==='dark'?'#000000':'#f7f6f9';}
+function render(){document.body.className='theme-'+(db.settings.theme==='light'?'light':'dark');$('#page').innerHTML=({home,inventory,pan,insights,wishlist,settings}[page]||home)();document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#add-fab-wrap').style.display=page==='settings'?'none':'';document.querySelector('meta[name="theme-color"]').content=db.settings.theme==='dark'?'#000000':'#f7f6f9';}
 function renderPreserve(){const a=document.activeElement,key=a?.id,pos=a?.selectionStart;render();if(key){let next=document.getElementById(key);if(next){next.focus();if(typeof pos==='number'&&next.setSelectionRange)next.setSelectionRange(pos,pos)}}}
 // Modal forms. Every physical unit has its own dates, status and cost.
 const field=(title,name,value='',type='text',extra='',hint='')=>`<div class="field"><label for="f-${attr(name)}">${title}</label><input id="f-${attr(name)}" name="${attr(name)}" type="${type}" value="${attr(value??'')}" ${extra}>${hint?`<div class="help">${hint}</div>`:''}</div>`;
 const selectField=(title,name,choices,value='',wide=false)=>`<div class="field ${wide?'wide':''}"><label for="f-${attr(name)}">${title}</label><select id="f-${attr(name)}" name="${attr(name)}">${choices.map(([id,label])=>`<option value="${attr(id)}" ${id===value?'selected':''}>${esc(label)}</option>`).join('')}</select></div>`;
-function openDialog(title,body,footer=''){closeModal();openModal=title;$('#modal-root').innerHTML=`<div class="modal-backdrop" id="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="${attr(title)}"><div class="modal-header"><h2>${esc(title)}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`;const focus=$('#modal-root input:not([type="hidden"]),#modal-root select');focus?.focus({preventScroll:true});}
+function openDialog(title,body,footer=''){closeFab();closeModal();openModal=title;$('#modal-root').innerHTML=`<div class="modal-backdrop" id="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="${attr(title)}"><div class="modal-header"><h2>${esc(title)}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`;const focus=$('#modal-root input:not([type="hidden"]),#modal-root select');focus?.focus({preventScroll:true});}
 function closeModal(){lookupToken++;stopScanner();$('#modal-root').innerHTML='';openModal='';modalPayload=null;}
 function formFooter(formId,text='Save product'){return `<button type="button" data-action="close-modal" class="button">Cancel</button><button type="submit" form="${formId}" class="button primary">${text}</button>`;}
 const extraDates=u=>`<div class="form-grid mt12">${field('Date opened','openedAt',u?.openedAt||'','date', '', 'Optional; used to calculate period-after-opening dates.')}${field('Date finished / exited','closedDate',u?.finishedAt||u?.closedAt||'','date')}${field('Expiry / best-before','expiryDate',u?.expiryDate||'','date')}${field('PAO months','paoMonths',u?.paoMonths||'','number','min="0" step="1" placeholder="e.g. 12"','Period after opening, if the packaging specifies it.')}${field('Location','location',u?.location||'','text','list="location-list" placeholder="Bathroom, storage, handbag…"')}<datalist id="location-list">${[...new Set(db.units.map(x=>x.location).filter(Boolean))].map(x=>`<option value="${attr(x)}"></option>`).join('')}</datalist>${field('Remaining (%)','remaining',u?.remaining??100,'number','min="0" max="100" step="5"')}${field('Date hit pan (optional)','hitPanAt',u?.hitPanAt||'','date')}</div>`;
@@ -135,28 +135,158 @@ function submitWish(form){let f=new FormData(form),id=f.get('id'),old=id?db.wish
 function wishDetail(id){const w=db.wishlist.find(x=>x.id===id);if(!w)return;openDialog(w.name,`<div class="row wrap">${labelPill(w.type==='replacement'?'Replacement':'Want to try','active')}${w.purchasedAt?labelPill('Added to collection','ok'):''}</div><p class="small muted">${esc(w.brand||'Unbranded')} · ${esc(categoryName(db,w.categoryId))}</p>${w.estimatedPrice!=null?`<h2>${efmt(w.estimatedPrice)}</h2>`:''}${w.notes?`<p>${esc(w.notes)}</p>`:''}<div class="row wrap mt24">${!w.purchasedAt?btn('＋ Add to collection','wish-to-product',`data-id="${attr(id)}"`,'button primary'):''}${btn('Edit','edit-wish',`data-id="${attr(id)}"`,'button')}${!w.purchasedAt?btn('Mark acquired','wish-acquired',`data-id="${attr(id)}"`,'button'):''}${btn('Delete','delete-wish',`data-id="${attr(id)}"`,'button danger')}</div>`);}
 function categoryForm(c=null){openDialog(c?'Rename category':'Add custom category',`<form id="category-form"><input type="hidden" name="id" value="${attr(c?.id||'')}"><div class="form-grid">${field('Category name *','name',c?.name||'','text','required maxlength="70"')}${!c?selectField('Place under','parentId',categories(db).map(x=>[x.id,categoryName(db,x.id)]),'',true):`<div class="field wide"><span class="small muted">Parent: ${esc(categoryName(db,c.parentId))}</span></div>`}</div></form>`,formFooter('category-form',c?'Rename':'Add category'));}
 function submitCategory(form){let f=new FormData(form),id=f.get('id'),name=String(f.get('name')||'').trim(),old=id?db.categories.find(x=>x.id===id):null,parent=old?.parentId||f.get('parentId');if(!name||!getCat(parent)){showToast('Enter a name and parent category');return}const dupe=categories(db).some(c=>c.parentId===parent&&c.name.toLowerCase()===name.toLowerCase()&&c.id!==id);if(dupe){showToast('A category with this name already exists here');return}const c=touch({...old,id:old?.id||uid('cat'),name,parentId:parent,color:getCat(parent)?.color||catColor(parent),builtin:false,createdAt:old?.createdAt||stamp()});change(d=>{if(old)d.categories=d.categories.map(x=>x.id===id?c:x);else d.categories.push(c)});closeModal();showToast('Category saved');}
-// Barcode scanning: native detector on supporting browsers, html5-qrcode loaded on demand otherwise.
-function stopScanner(){if(scanInterval){clearTimeout(scanInterval);scanInterval=null}if(media){media.getTracks().forEach(t=>t.stop());media=null}if(qr){let old=qr;qr=null;Promise.resolve().then(()=>old.stop()).catch(()=>{}).finally(()=>{try{old.clear()}catch{}})}scanBusy=false;}
-function scanDialog(){openDialog('Scan a barcode',`<div class="notice info mb12">Point the camera at a UPC/EAN barcode, choose a barcode photo, or type the number. Product lookups need internet; known products stay cached locally.</div><div class="scanner-box" id="scanner-box"><div class="muted small" id="scanner-placeholder">Camera not started</div><video id="native-video" class="hidden" autoplay muted playsinline></video><div id="reader" class="hidden" style="width:100%"></div></div><div class="row wrap mt12">${btn('Start camera','start-camera','','button primary')}${btn('Stop','stop-camera','','button')}<label class="button" style="cursor:pointer">Scan image <input id="scan-image" type="file" accept="image/*" class="hidden"></label></div><form id="barcode-form" class="mt18"><div class="field"><label for="manual-code">Enter barcode manually</label><div class="row"><input id="manual-code" name="barcode" inputmode="numeric" placeholder="EAN / UPC number" required><button type="submit" class="button primary">Look up</button></div></div></form><div class="small muted mt12" id="scanner-status" role="status">Camera access is requested only when you tap Start camera.</div>`);}
+// Scanner workflow follows Macro Tracker: automatically start the rear camera,
+// use native EAN/UPC detection where available, and fall back to ZXing.
+// Epoch checks prevent a slow permission/CDN request from reopening a closed modal.
+const barcodeFormats=['ean_13','ean_8','upc_a','upc_e','code_128'];
+function stopScanner(){
+  scannerEpoch++;
+  if(scanInterval){clearTimeout(scanInterval);scanInterval=null}
+  if(zxingControls){try{zxingControls.stop()}catch{}zxingControls=null}
+  zxingReader=null;
+  if(media){try{media.getTracks().forEach(t=>t.stop())}catch{}media=null}
+  const video=$('#barcode-video');if(video){try{video.pause()}catch{}video.srcObject=null}
+  scanBusy=false;
+}
+function closeFab(){fabOpen=false;$('#add-fab-menu')?.classList.add('hidden');$('#add-fab')?.setAttribute('aria-expanded','false')}
+function toggleFab(){fabOpen=!fabOpen;$('#add-fab-menu')?.classList.toggle('hidden',!fabOpen);$('#add-fab')?.setAttribute('aria-expanded',String(fabOpen))}
+function scanDialog(){
+  openDialog('Scan barcode',`<div id="barcode-scanner-pane">
+    <div class="barcode-camera"><video id="barcode-video" autoplay muted playsinline></video><div class="barcode-guide"><span></span></div></div>
+    <div id="scanner-status" class="small muted" role="status" aria-live="polite">Starting camera…</div>
+    <div class="row wrap mt12">${btn('Restart camera','start-camera','','button small-btn')}${btn('Stop camera','stop-camera','','button small-btn')}<label class="button small-btn scan-upload">Scan barcode photo<input id="scan-image" type="file" accept="image/*" class="hidden"></label></div>
+    <form id="barcode-form" class="mt18"><div class="field"><label for="manual-code">Or enter barcode number</label><div class="row barcode-manual"><input id="manual-code" name="barcode" inputmode="numeric" autocomplete="off" placeholder="EAN / UPC" required><button type="submit" class="button primary">Look up</button></div></div></form>
+    <p class="small muted mt12">Product details come from Open Beauty Facts when online. Scanned products already in your collection are recognized instantly. You can add missing products manually.</p>
+  </div><div id="barcode-result-pane" class="hidden"></div>`);
+  // Do not summon the on-screen keyboard before opening the camera.
+  document.activeElement?.blur?.();
+  startCamera();
+}
 const scanStatus=text=>{const el=$('#scanner-status');if(el)el.textContent=text};
-async function scannerLibrary(){if(window.Html5Qrcode)return true;if(!navigator.onLine)throw Error('The fallback scanner must load once while online. You can still type a barcode.');if(window.__scannerLoad)return window.__scannerLoad;window.__scannerLoad=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js';script.onload=()=>resolve(!!window.Html5Qrcode);script.onerror=()=>reject(Error('Could not load the camera scanner library'));document.head.append(script)});return window.__scannerLoad;}
-async function startCamera(){stopScanner();try{
- const useNative=!!window.BarcodeDetector;
- if(useNative){let formats=await BarcodeDetector.getSupportedFormats?.().catch(()=>[])||[];if(!formats.length||formats.includes('ean_13')||formats.includes('upc_a')){
-  const detector=new BarcodeDetector(formats.length?{formats:formats.filter(x=>['ean_13','ean_8','upc_a','upc_e','code_128'].includes(x))}:undefined);
-  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}});media=stream;const video=$('#native-video');if(!video){stopScanner();return}video.classList.remove('hidden');$('#scanner-placeholder')?.classList.add('hidden');video.srcObject=stream;await video.play();scanStatus('Camera scanning…');
-  const tick=async()=>{if(!media||!$('#native-video'))return;try{if(video.readyState>=2&&!scanBusy){scanBusy=true;const found=await detector.detect(video);scanBusy=false;if(found.length){await foundBarcode(found[0].rawValue);return}}}catch(e){scanBusy=false}scanInterval=setTimeout(tick,220)};tick();return;
- }}
- await scannerLibrary();const el=$('#reader');if(!el)return;el.classList.remove('hidden');$('#scanner-placeholder')?.classList.add('hidden');qr=new window.Html5Qrcode('reader',{verbose:false});await qr.start({facingMode:'environment'},{fps:10,qrbox:{width:220,height:125}},code=>{foundBarcode(code)},()=>{});scanStatus('Camera scanning…');
- }catch(e){stopScanner();scanStatus('Camera unavailable: '+e.message+'. Use an image or type the code.');}}
-async function scanImage(file){if(!file)return;scanStatus('Reading barcode image…');try{let result='';if(window.BarcodeDetector){try{const bitmap=await createImageBitmap(file);const detected=await (new BarcodeDetector()).detect(bitmap);bitmap.close?.();result=detected[0]?.rawValue||''}catch{}}if(!result){await scannerLibrary();const target=$('#reader');target.classList.remove('hidden');qr=new window.Html5Qrcode('reader',{verbose:false});result=await qr.scanFile(file,true)}if(!result)throw Error('No barcode detected');await foundBarcode(result)}catch(e){scanStatus(e.message+'. You can enter the code manually.')}}
+function scannerActive(epoch){return scannerEpoch===epoch&&!!$('#barcode-scanner-pane')&&!$('#barcode-scanner-pane').classList.contains('hidden')}
+async function scannerLibrary(){
+  if(window.ZXingBrowser)return window.ZXingBrowser;
+  if(!navigator.onLine)throw Error('This device needs an internet connection for first-time scanner setup. You can still enter a barcode.');
+  if(window.__zxingLoad)return window.__zxingLoad;
+  window.__zxingLoad=new Promise((resolve,reject)=>{
+    const old=$('#zxingBrowserScript');if(old){old.remove()}
+    const script=document.createElement('script');script.id='zxingBrowserScript';
+    // Same fallback library and URL as the working Macro Tracker app.
+    script.src='https://unpkg.com/@zxing/browser@0.2.1';
+    script.onload=()=>window.ZXingBrowser?resolve(window.ZXingBrowser):reject(Error('ZXing did not initialize'));
+    script.onerror=()=>reject(Error('Scanner library could not be loaded'));
+    document.head.append(script);
+  }).catch(err=>{window.__zxingLoad=null;$('#zxingBrowserScript')?.remove();throw err});
+  return window.__zxingLoad;
+}
+async function startCamera(){
+  stopScanner();const epoch=scannerEpoch;
+  if(!navigator.mediaDevices?.getUserMedia){scanStatus('Camera access is unavailable in this browser. Use the barcode field instead.');return}
+  scanStatus('Starting camera…');
+  try{
+    let wanted=[];
+    if(window.BarcodeDetector){try{const supported=await window.BarcodeDetector.getSupportedFormats();wanted=barcodeFormats.filter(x=>supported.includes(x))}catch{}}
+    if(!scannerActive(epoch))return;
+    const video=$('#barcode-video');
+    if(wanted.length){
+      const detector=new window.BarcodeDetector({formats:wanted});
+      const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+      if(!scannerActive(epoch)){stream.getTracks().forEach(t=>t.stop());return}
+      media=stream;video.srcObject=stream;await video.play();
+      if(!scannerActive(epoch))return;
+      scanStatus('Point the camera at the printed barcode.');
+      const tick=async()=>{
+        if(!scannerActive(epoch)||!media)return;
+        try{if(video.readyState>=2&&!scanBusy&&!barcodeLookupBusy){scanBusy=true;const found=await detector.detect(video);scanBusy=false;if(!scannerActive(epoch))return;if(found?.length){handleBarcodeDetected(found[0].rawValue);return}}}
+        catch(err){scanBusy=false;console.info('Native barcode detection frame failed',err)}
+        if(scannerActive(epoch))scanInterval=setTimeout(tick,220);
+      };
+      tick();return;
+    }
+    const ZX=await scannerLibrary();if(!scannerActive(epoch))return;
+    zxingReader=new ZX.BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:250,delayBetweenScanSuccess:1000});
+    scanStatus('Point the camera at the printed barcode.');
+    // This is the same reader setup that works in Macro Tracker.
+    const controls=await zxingReader.decodeFromConstraints(
+      {audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}},video,
+      (result,error,controls)=>{if(result&&!barcodeLookupBusy&&scannerActive(epoch)){
+        zxingControls=controls;
+        const code=(result.getText?.()||result.text||'').trim();if(code)handleBarcodeDetected(code);
+      }});
+    if(!scannerActive(epoch)){controls.stop();return}
+    zxingControls=controls;
+  }catch(e){if(!scannerActive(epoch))return;console.error('Barcode scanner start failed',e);stopScanner();scanStatus('Camera could not start: '+(e?.message||'unknown error')+'. You can enter the number manually or try a photo.');}
+}
+async function scanImage(file){
+  if(!file)return;
+  stopScanner();const epoch=scannerEpoch;scanStatus('Reading barcode photo…');
+  try{
+    let result='';
+    if(window.BarcodeDetector&&window.createImageBitmap){
+      try{const formats=await window.BarcodeDetector.getSupportedFormats();const wanted=barcodeFormats.filter(x=>formats.includes(x));if(wanted.length){const bitmap=await createImageBitmap(file);try{const found=await new window.BarcodeDetector({formats:wanted}).detect(bitmap);result=found?.[0]?.rawValue||''}finally{bitmap.close?.()}}}catch(e){console.info('Native image scan failed',e)}
+    }
+    if(!scannerActive(epoch))return;
+    if(!result){
+      const ZX=await scannerLibrary();if(!scannerActive(epoch))return;
+      const reader=new ZX.BrowserMultiFormatReader();const url=URL.createObjectURL(file);
+      try{const detected=await reader.decodeFromImageUrl(url);result=detected?.getText?.()||detected?.text||''}finally{URL.revokeObjectURL(url)}
+    }
+    if(!scannerActive(epoch))return;
+    if(!result)throw Error('No barcode was detected in that photo');
+    handleBarcodeDetected(result);
+  }catch(e){if(scannerActive(epoch))scanStatus((e.message||'Cannot read photo')+'. Try moving closer or type the barcode.');}
+}
+function barcodeResult(code,item,source='missing'){
+  const pane=$('#barcode-result-pane'),scanner=$('#barcode-scanner-pane');if(!pane||!scanner)return;
+  scanner.classList.add('hidden');pane.classList.remove('hidden');
+  const existing=source==='existing';
+  const meta=existing?item:(item||{});
+  const sourceText={existing:'Already in your collection',cache:'Saved barcode lookup',network:'Open Beauty Facts',missing:'No matching product found'}[source]||'';
+  const validImage=meta.image&&/^(https:\/\/|data:image\/)/.test(meta.image);
+  pane.innerHTML=`<div class="barcode-result">
+    <div class="row wrap barcode-result-heading">
+      ${validImage?`<img src="${attr(meta.image)}" alt="Product photo" class="barcode-result-image">`:''}
+      <div class="grow"><div class="small muted">${esc(sourceText)}</div>
+      <h3>${esc(meta.name||'Product not found')}</h3>
+      <div class="small muted">${esc([meta.brand,meta.size?(meta.size+' '+(meta.unit||'ml')):''].filter(Boolean).join(' · '))}</div>
+      <div class="small muted mt8">Barcode ${esc(code)}</div></div>
+    </div>
+    <p class="small muted mt12">${existing?'You already own this product type. Add another physical unit instead of creating a duplicate.':source==='missing'?'The barcode was read successfully, but the product is not listed in the public database. You can still save it.':'Review the details and choose the most specific category before saving. Product databases can be incomplete.'}</p>
+    <div class="row wrap mt18">
+      ${existing?btn('＋ Add another unit','barcode-add-unit',`data-id="${attr(meta.id)}"`,'button primary'):btn('Continue to product details','barcode-add-product','','button primary')}
+      ${btn('Scan another','scan-again','','button')}
+    </div>
+  </div>`;
+  // Keep the scanned information even if the user temporarily navigates through the result.
+  modalPayload=existing?{barcode:code,existingId:meta.id}:{...meta,barcode:code};
+}
+async function handleBarcodeDetected(raw){
+  const code=String(raw||'').trim().replace(/\s+/g,'');
+  if(!code){scanStatus('No barcode detected.');return}
+  if(!/^\d{6,14}$/.test(code)){scanStatus('That does not look like an EAN/UPC barcode. Try scanning again or enter a 6–14 digit number.');return}
+  if(barcodeLookupBusy)return;
+  barcodeLookupBusy=true;
+  stopScanner();const epoch=scannerEpoch;
+  scanStatus(`Barcode ${code} detected. Looking up product…`);
+  try{
+    const existing=db.products.find(p=>p.barcode===code);
+    if(existing){if(scannerEpoch===epoch)barcodeResult(code,existing,'existing');return}
+    let found=db.barcodeCache[code],source=found?'cache':'missing';
+    if(!found&&navigator.onLine){
+      const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),12000);
+      try{const response=await fetch(`https://world.openbeautyfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,brands,quantity,image_front_url,image_url,categories_tags,categories`,{signal:ctrl.signal});
+        if(response.ok){const data=await response.json();if(data.status===1&&data.product){found=getLookupData(data.product,code);source='network';
+          // Cache even sparse matches, and do not render the whole page while scanning.
+          db.barcodeCache[code]={...found,lookedUpAt:stamp()};save();
+        }}
+      }catch(e){console.warn('Beauty Facts lookup failed',e)}finally{clearTimeout(timer)}
+    }
+    if(scannerEpoch===epoch)barcodeResult(code,found||{barcode:code},source);
+  }finally{barcodeLookupBusy=false}
+}
 const getLookupData=(p,barcode)=>{let full=[p.categories,p.categories_tags?.join(' '),p.product_name].filter(Boolean).join(' ').toLowerCase();const guesses=[
  [/toothpaste/,'hygiene-oral-care-toothpaste'],[/mouthwash/,'hygiene-oral-care-mouthwash'],[/toothbrush/,'hygiene-oral-care-toothbrush-head'],[/deodorant|antiperspirant/,'body-protection-deodorant'],[/body.lotion/,'body-moisturising-body-lotion'],[/hand.cream/,'body-moisturising-hand-cream'],[/body.wash|shower.gel/,'body-bath-shower-body-wash'],[/conditioner/,'hair-washing-conditioner'],[/dry.shampoo/,'hair-washing-dry-shampoo'],[/shampoo/,'hair-washing-everyday-shampoo'],[/mascara/,'makeup-eyes-regular-mascara'],[/lip.gloss/,'makeup-lips-lip-gloss'],[/lipstick/,'makeup-lips-lipstick'],[/foundation/,'makeup-base-foundation'],[/concealer/,'makeup-base-concealer'],[/blush/,'makeup-cheeks-powder-blush'],[/nail.polish/,'nails-colour-nail-polish'],[/perfume|eau.de.parfum/,'fragrance-perfume-eau-de-parfum'],[/sunscreen|sun.protection|spf/,'skin-sun-protection-face-spf'],[/serum/,'skin-serums-actives-other-serum-active'],[/moisturizer|moisturiser|face.cream/,'skin-moisturisers-face-cream'],[/cleanser|face.wash/,'skin-cleansers-gel-cleanser']
  ];let cat=guesses.find(([pattern,id])=>pattern.test(full)&&getCat(id));let quantity=String(p.quantity||'').match(/([\d.,]+)\s*(ml|g|oz|pcs|pieces)/i);return {name:p.product_name||'',brand:(p.brands||'').split(',')[0].trim(),barcode,categoryId:cat?.[1]||'',image:p.image_front_url||p.image_url||'',size:quantity?Number(quantity[1].replace(',','.')):'',unit:quantity?.[2]?.toLowerCase().replace('pieces','pcs')||'ml'};};
-async function foundBarcode(raw){const token=lookupToken;let code=String(raw||'').trim();if(!code){scanStatus('Barcode was blank.');return}if(!/^[a-zA-Z0-9._-]{5,32}$/.test(code)){scanStatus('Please enter a valid barcode number.');return}stopScanner();scanStatus(`Looking up ${code}…`);const existing=db.products.find(p=>p.barcode===code);if(existing){newUnitForm(existing.id);showToast('Found in your collection — add another unit');return}
- let found=db.barcodeCache[code];if(!found&&navigator.onLine){try{const ctrl=new AbortController,timeout=setTimeout(()=>ctrl.abort(),10000);try{const res=await fetch(`https://world.openbeautyfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,brands,quantity,image_front_url,image_url,categories_tags,categories`,{signal:ctrl.signal});if(res.ok){const data=await res.json();if(data.status===1&&data.product){found=getLookupData(data.product,code);change(d=>{d.barcodeCache[code]={...found,lookedUpAt:stamp()}},{silent:true})}}}finally{clearTimeout(timeout)}}catch(e){console.warn('Barcode lookup unavailable',e)}}
- if(token!==lookupToken)return;if(!found)showToast('No database match — complete details manually');else showToast('Product details found — check before saving');productForm(null,{scanData:found||{barcode:code}});
-}
 function showExpiry(){let alerts=db.units.filter(isActive).map(u=>({u,info:expiryInfo(u)})).filter(x=>x.info&&x.info.level!=='fine').sort((a,b)=>a.info.date.localeCompare(b.info.date));openDialog('Expiry & PAO reminders',alerts.length?alerts.map(({u,info})=>{let p=getProduct(u.productId);return `<div class="data-row"><div class="small"><b>${esc(p?.name||'Product')}</b><div class="muted mt8">${esc(info.why)} · ${shortDate(info.date)} ${info.days<0?'(past date)':`(${info.days} days)`}</div></div>${btn('Edit','edit-unit',`data-id="${attr(u.id)}"`,'button small-btn')}</div>`}).join(''):empty('✓','No upcoming dates','No tracked active product has an expiry or PAO date within 30 days.'));}
 // Entire-state backups, including locally saved images, plus timestamp-aware conflict handling.
 function exportBackup(){const payload={...db,exportedAt:stamp(),app:'Project Pan'};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`project-pan-backup-${today()}.json`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);showToast('Backup exported');}
@@ -175,6 +305,10 @@ async function handleAction(action,el){const id=el.dataset.id;
  case 'close-modal':closeModal();break;
  case 'add-product':productForm();break;
  case 'scan':scanDialog();break;
+ case 'toggle-add-menu':toggleFab();break;
+ case 'scan-again':scanDialog();break;
+ case 'barcode-add-product':{const source=modalPayload||{};productForm(null,{scanData:source});break;}
+ case 'barcode-add-unit':{const item=getProduct(id);if(item)newUnitForm(item.id);break;}
  case 'category':scope=id||null;invStatus='active';search='';navigate('inventory');break;
  case 'stats-category':statsScope=id||null;render();break;
  case 'product-detail':productDetail(id);break;
@@ -212,14 +346,14 @@ async function handleAction(action,el){const id=el.dataset.id;
  case 'check-update':{const reg=window.__swRegistration;if(reg){await reg.update();workerWaiting=!!reg.waiting;render();showToast(workerWaiting?'Update ready to apply':'No update waiting')}else showToast('App not installed / service worker unavailable');break;}
  case 'apply-update':{const reg=window.__swRegistration;if(reg?.waiting){updateRequested=true;reg.waiting.postMessage({type:'SKIP_WAITING'});}break;}
  case 'start-camera':startCamera();break;
- case 'stop-camera':stopScanner();scanStatus('Camera stopped');break;
+ case 'stop-camera':stopScanner();scanStatus('Camera stopped. Tap Restart camera when ready.');break;
  case 'show-expiry':showExpiry();break;
  default:break;
  }
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-action],[data-page]');if(!b)return;const modalOpen=!!$('#modal-root .modal');if(b.dataset.page){if(modalOpen)return;navigate(b.dataset.page);return}handleAction(b.dataset.action,b).catch?.(err=>{console.error(err);showToast('Something went wrong: '+err.message)})});
 document.addEventListener('submit',e=>{const f=e.target,formId=f?.getAttribute?.('id');if(!formId)return;e.preventDefault();let task;
- if(formId==='product-form')task=submitProduct(f);else if(formId==='unit-form')task=submitUnit(f);else if(formId==='challenge-form')task=submitChallenge(f);else if(formId==='wish-form')task=submitWish(f);else if(formId==='category-form')task=submitCategory(f);else if(formId==='barcode-form')task=foundBarcode(new FormData(f).get('barcode'));
+ if(formId==='product-form')task=submitProduct(f);else if(formId==='unit-form')task=submitUnit(f);else if(formId==='challenge-form')task=submitChallenge(f);else if(formId==='wish-form')task=submitWish(f);else if(formId==='category-form')task=submitCategory(f);else if(formId==='barcode-form')task=handleBarcodeDetected(new FormData(f).get('barcode'));
  Promise.resolve(task).catch(err=>{console.error(err);showToast('Could not save: '+err.message)});
 });
 document.addEventListener('change',e=>{const t=e.target;
@@ -227,5 +361,5 @@ document.addEventListener('change',e=>{const t=e.target;
 });
 document.addEventListener('input',e=>{if(e.target.id==='inv-search'){search=e.target.value;renderPreserve()}else if(e.target.id==='category-search')filterCategories(e.target.value)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openModal)closeModal()});
-document.addEventListener('click',e=>{if(e.target.id==='backdrop')closeModal()});
+document.addEventListener('click',e=>{if(e.target.id==='backdrop')closeModal();if(fabOpen&&!e.target.closest('#add-fab-wrap'))closeFab()});
 (async()=>{try{const stored=await load();if(validBackup(stored))db={...blank(),...stored,settings:{...blank().settings,...stored.settings}};else if(stored?.units?.length)showToast('Storage format not recognised; new empty collection shown');}catch(e){storageError=true;console.error(e);showToast('Local storage unavailable; changes may not persist.')}render();initSW();})();
